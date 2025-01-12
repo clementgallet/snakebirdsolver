@@ -16,7 +16,24 @@ DIR_U = 1
 DIR_D = 2
 DIR_L = 4
 DIR_R = 8
+DIR_UU = (DIR_U << 4) | DIR_U
+DIR_UL = (DIR_L << 4) | DIR_U
+DIR_UR = (DIR_R << 4) | DIR_U
+DIR_DD = (DIR_D << 4) | DIR_D
+DIR_DL = (DIR_L << 4) | DIR_D
+DIR_DR = (DIR_R << 4) | DIR_D
+DIR_LU = (DIR_U << 4) | DIR_L
+DIR_LD = (DIR_D << 4) | DIR_L
+DIR_LL = (DIR_L << 4) | DIR_L
+DIR_RU = (DIR_U << 4) | DIR_R
+DIR_RD = (DIR_D << 4) | DIR_R
+DIR_RR = (DIR_R << 4) | DIR_R
 DIRS = [DIR_U, DIR_D, DIR_L, DIR_R]
+DIRS_DOUBLE = [DIR_UU, DIR_UL, DIR_UR,
+    DIR_DD, DIR_DL, DIR_DR,
+    DIR_LU, DIR_LD, DIR_LL,
+    DIR_RU, DIR_RD, DIR_RR
+]
 DIR_REV = {
     DIR_U: DIR_D,
     DIR_D: DIR_U,
@@ -28,6 +45,19 @@ DIR_T = {
     DIR_D: 'Down',
     DIR_L: 'Left',
     DIR_R: 'Right',
+    DIR_UU: 'Up-Up',
+    DIR_UL: 'Up-Left',
+    DIR_UR: 'Up-Right',
+    DIR_DD: 'Down-Down',
+    DIR_DL: 'Down-Left',
+    DIR_DR: 'Down-Right',
+    DIR_LU: 'Left-Up',
+    DIR_LD: 'Left-Down',
+    DIR_LL: 'Left-Left',
+    DIR_RU: 'Right-Up',
+    DIR_RD: 'Right-Down',
+    DIR_RR: 'Right-Right',
+
 }
 DIR_CMD = {
     'w': DIR_U,
@@ -115,7 +145,7 @@ try:
     import colorama
     color_wall = {
         TYPE_EMPTY: colorama.Style.RESET_ALL,
-        TYPE_WALL: colorama.Fore.BLACK,
+        TYPE_WALL: colorama.Fore.WHITE,
         TYPE_SPIKE: colorama.Fore.RED,
         TYPE_EXIT: colorama.Fore.MAGENTA,
         TYPE_VOID: colorama.Fore.RED,
@@ -216,6 +246,7 @@ class Snakebird(object):
         self.color = color
         self.level = level
         self.exited = False
+        self.destroyed = False
         self.cells = []
         self.checksum_id = bytes(SNAKE_T[self.color][0], encoding='latin1')
 
@@ -504,6 +535,9 @@ class Snakebird(object):
         if self.exited:
             return (False, True)
 
+        if self.destroyed:
+            return (False, True)
+
         # Find out what's beneath us
         (snakes, wall, spikes, void, fruit) = self.get_adjacents(DIR_D)
 
@@ -517,7 +551,8 @@ class Snakebird(object):
 
         # If we have spikes or void under us, we'll die
         if spikes or void:
-            raise PlayerLose('Fell to your death!')
+            self.destroy()
+            return (True, False)
 
         # Otherwise, we fall!  Woo.  Check for teleport indexes as we go
         teleport_idx = None
@@ -567,21 +602,25 @@ class Snakebird(object):
             return False
 
     def destroy(self):
-        """
-        Destroys ourself (just raises an exception)
-        """
-        raise PlayerLose('Fell to your death!')
+        for coord in self.cells:
+            del self.level.snake_coords[coord]
+        self.destroyed = True
+        self.cells = []
+        if self.level.check_loose():
+            raise PlayerLose('Fell to your death!')
 
     def clone(self):
         newobj = Snakebird(self.color, self.level)
         newobj.cells = list(self.cells)
         newobj.exited = self.exited
+        newobj.destroyed = self.destroyed
         return newobj
 
     def apply_clone(self, newobj):
         self.cells = []
         self.cells = list(newobj.cells)
         self.exited = newobj.exited
+        self.destroyed = newobj.destroyed
 
     def checksum(self):
         return b''.join([struct.pack('BB', *c) for c in self.cells])
@@ -943,10 +982,25 @@ class Level(object):
         """
         Check to see if we've won
         """
+        one_existed = False
+        one_alive = False
         for sb in self.snakebirds_l:
-            if not sb.exited:
+            if sb.exited:
+                one_existed = True
+            elif not sb.destroyed:
+                one_alive = True
+        if one_existed:
+            if not one_alive:
+                self.won = True
+                return True
+            else:
+                raise PlayerLose('Fell to your death!')
+        return False
+
+    def check_loose(self):
+        for sb in self.snakebirds_l:
+            if not sb.destroyed:
                 return False
-        self.won = True
         return True
 
     def populate_snake_coords(self):
@@ -1266,8 +1320,8 @@ class State(object):
             position, direction = node
             for reached in (node, position):
                 if reached == goal:
-                    self.level.distance_cache[key] = cost
-                    return cost
+                    self.level.distance_cache[key] = (cost + 1) // 2
+                    return (cost + 1) // 2
             #Very conservative approximation if there are teleporters
             for t_from, t_to in self.level.teleporter.items():
                 if abs(position[0] - t_from[0]) + abs(position[1] - t_from[1]) < self.level.snakebird_length_max:
@@ -1303,7 +1357,7 @@ class State(object):
         For each goal, finds the cost of the cheapest path to achieve that goal over all starting points.
         If reverse=True, then the snakebirds are moving from the goals to the starting points.
         """
-        only_one_snakebird = sum(1 for sb in self.snakebirds_l if not sb.exited) == 1
+        only_one_snakebird = sum(1 for sb in self.snakebirds_l if not sb.exited and not sb.destroyed) == 1
         min_cost = {}
         plan_path = lambda s, g: self.shortest_path(*((g, s) if reverse else (s, g)), only_one_snakebird)
         for g in goals:
@@ -1317,10 +1371,10 @@ class State(object):
         (snakebird -> exit or snakebird -> fruit -> exit). Usually quite weak, but can still help a lot.
         """
         directions = list(DIR_MODS.values())
-        sb_heads = [sb.decapitate() for sb in self.snakebirds_l if not sb.exited]
+        sb_heads = [sb.decapitate() for sb in self.snakebirds_l if not sb.exited and not sb.destroyed]
         exits = [(self.level.exit, direction) for direction in directions]
 
-        sb_to_exit_max = max(self.plan_paths(exits, sb_heads, reverse=True).values())
+        sb_to_exit_max = min(self.plan_paths([self.level.exit], sb_heads, reverse=True).values())
 
         if not self.fruits:
             return sb_to_exit_max
@@ -1402,13 +1456,29 @@ class Game(object):
         self.moves.append((sb, direction))
         self.push_state(state)
         self.cur_steps += 1
-        if (sb.move(direction)):
-            self.level.populate_snake_coords()
-            # Check to see if we won and exit if we have
-            if self.level.won:
-                return True
-            self.level.check_fall()
-            return self.level.won
+        
+        if direction > 8:
+            if sb.move(direction&0xf):
+                self.level.populate_snake_coords()
+                if self.level.won:
+                    return True
+                if sb.move(direction>>4):
+#                    self.level.populate_snake_coords()
+                    # Check to see if we won and exit if we have
+                    if self.level.won:
+                        return True
+                self.level.populate_snake_coords()
+                self.level.check_fall()
+                return self.level.won
+        else:
+            if (sb.move(direction)):
+                self.level.populate_snake_coords()
+                # Check to see if we won and exit if we have
+                if self.level.won:
+                    return True
+#                if len(self.moves) % 2 == 0:
+                self.level.check_fall()
+                return self.level.won
 
     def undo(self):
         if len(self.states) > 0:
@@ -1449,7 +1519,7 @@ class Game(object):
         self.level.print_level()
         snakebirds_active = 0
         for sb in self.level.snakebirds_l:
-            if not sb.exited:
+            if not sb.exited and not sb.destroyed:
                 snakebirds_active += 1
         print('Fruit left: {} | Snakebirds active: {} | Moves: {}'.format(
             len(self.level.fruits),
@@ -1572,7 +1642,7 @@ class Game(object):
         if not new_checksum:
             return
         for sb in self.level.snakebirds_l:
-            if not sb.exited:
+            if not sb.exited and not sb.destroyed:
                 for direction in DIRS:
                     try:
                         self.move(sb, direction, state)
@@ -1620,7 +1690,21 @@ class Game(object):
             for state in queue:
                 self.moves = state.apply()
                 for sb in self.level.snakebirds_l:
-                    if not sb.exited:
+                    if not sb.exited and not sb.destroyed:
+                        for direction in DIRS_DOUBLE:
+                            self.moves = state.apply()
+                            try:
+                                self.move(sb, direction, state)
+                                if self.level.won:
+                                    if not quiet:
+                                        print('')
+                                    self.store_winning_moves(quiet=quiet, display_moves=False)
+                                    return
+                                (new_state, is_new_state) = self.get_state(moves=self.moves)
+                                if is_new_state:
+                                    next_queue.append(new_state)
+                            except PlayerLose:
+                                pass
                         for direction in DIRS:
                             self.moves = state.apply()
                             try:
@@ -1665,7 +1749,9 @@ class Game(object):
             for sb in self.level.snakebirds_l:
                 if sb.exited:
                     continue
-                for direction in DIRS:
+                if sb.destroyed:
+                    continue
+                for direction in DIRS_DOUBLE:
                     self.moves = state.apply()
                     try:
                         self.move(sb, direction, state)
