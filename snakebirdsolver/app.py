@@ -80,6 +80,10 @@ DIR_MODS_REV = {}
 for (k, v) in DIR_MODS.items():
     DIR_MODS_REV[v] = k
 
+DIR_MODS_REV_INDEX = {}
+for i in range(len(DIR_MODS.values())):
+    DIR_MODS_REV_INDEX[list(DIR_MODS.values())[i]] = i + 1
+
 SNAKE_CHARS = {
     (DIR_U | DIR_D): '║',
     (DIR_U | DIR_L): '╝',
@@ -631,7 +635,19 @@ class Snakebird(object):
         self.destroyed = newobj.destroyed
 
     def checksum(self):
-        return b''.join([struct.pack('BB', *c) for c in self.cells])
+        head = struct.pack('BB', *self.cells[0])
+        dir_to_head = 0
+        for i in range(1,len(self.cells)):
+            dir_to_head *= 5
+            dir_to_head += DIR_MODS_REV_INDEX[(self.cells[i-1][0] - self.cells[i][0],
+                self.cells[i-1][1] - self.cells[i][1])]
+            if i%3 == 0:
+                head += struct.pack('B', dir_to_head)
+                dir_to_head = 0
+        if dir_to_head > 0:
+            head += struct.pack('B', dir_to_head)
+        return head
+#       return b''.join([struct.pack('BB', *c) for c in self.cells])
 
 class Pushable(Snakebird):
     """
@@ -1282,10 +1298,11 @@ class State(object):
                     tp_list.append(b'\xfe')
                 else:
                     tp_list.append(occupier.checksum_id)
-        sumlist.append(b''.join(tp_list))
+            sumlist.append(b''.join(tp_list))
 
         # Fruit
-        sumlist.append(b''.join([struct.pack('BB', *fruit) for fruit in self.fruits.keys()]))
+        if len(self.fruits) > 0:
+            sumlist.append(b''.join([struct.pack('BB', *fruit) for fruit in self.fruits.keys()]))
 
         # TODO: Ditto re: combination
         # ^ I assume this refers to the note in State.__init__ but heck if
