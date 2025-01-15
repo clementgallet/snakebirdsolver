@@ -1770,9 +1770,9 @@ class Game(object):
             g = -neg_g
             if g > self.checksums[checksum]:
                 continue
+            if f > self.max_steps:
+                continue
             if g > max_depth:
-                if g == self.max_steps:
-                    continue
                 if not quiet:
                     sys.stdout.write("\rAt depth: {}...".format(g))
                     sys.stdout.flush()
@@ -1792,12 +1792,15 @@ class Game(object):
                                 if not quiet:
                                     print('')
                                 self.store_winning_moves(quiet=quiet, display_moves=False)
-                                return
+                                if self.level.return_first_solution:
+                                    return
+                                self.level.won = False
+                                break
                             g1 = g + 1
                             (new_state, is_new_state, new_checksum) = self.get_state(moves=self.moves, steps=g1)
                             if is_new_state:
                                 h1 = new_state.heuristic()
-                                if h1 != float('inf'):
+                                if h1 != float('inf') and (g1 + h1) <= self.max_steps:
                                     heapq.heappush(queue, (g1 + h1, -g1, new_checksum, new_state))
                     except PlayerLose:
                         dirty = True
