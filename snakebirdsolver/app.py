@@ -635,6 +635,8 @@ class Snakebird(object):
         self.destroyed = newobj.destroyed
 
     def checksum(self):
+        if len(self.cells) == 0:
+            return b''
         head = struct.pack('BB', *self.cells[0])
         dir_to_head = 0
         for i in range(1,len(self.cells)):
