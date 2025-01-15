@@ -1491,6 +1491,9 @@ class Game(object):
         if direction > 8:
             if sb.move(direction&0xf):
                 self.level.populate_snake_coords()
+                if self.level.won:
+                    self.validate_move(sb, direction, state)
+                    return (True, True)
                 if sb.move(direction>>4):
                     self.level.populate_snake_coords()
                     # Check to see if we won and exit if we have
