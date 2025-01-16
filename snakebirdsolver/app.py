@@ -634,7 +634,17 @@ class Snakebird(object):
         self.exited = newobj.exited
         self.destroyed = newobj.destroyed
 
-    def checksum(self):
+    def pack(self):
+        return b''.join([struct.pack('BB', *c) for c in self.cells])
+
+    def unpack(self, packed):
+        self.cells = []
+        for i in range(0, len(packed), 2):
+            self.cells.append(struct.unpack('BB', packed[i:i+2]))
+        self.exited = False
+        self.destroyed = len(self.cells) == 0        
+
+    def checksum_small(self):
         if len(self.cells) == 0:
             return b''
         head = struct.pack('BB', *self.cells[0])
@@ -1236,16 +1246,18 @@ class State(object):
         self.fruits = {}
         self.snakebirds_l = []
         self.pushables = {}
-        self.moves = moves
+        self.moves = []
+        if len(moves) > 0:
+            self.moves = b''.join([struct.pack('BB', *m) for m in moves])
         self.teleporter_occupied = level.teleporter_occupied.copy()
 
         for coord in level.fruits.keys():
             self.fruits[coord] = True
         # TODO: I feel these could be combined...
         for sb in level.snakebirds_l:
-            self.snakebirds_l.append(sb.clone())
+            self.snakebirds_l.append(sb.pack())
         for (num, obj) in level.pushables.items():
-            self.pushables[num] = obj.clone()
+            self.pushables[num] = obj.pack()
 
     def apply(self):
 
@@ -1253,18 +1265,21 @@ class State(object):
         for coords in self.fruits.keys():
             self.level.fruits[coords] = True
 
-        for sb in self.snakebirds_l:
-            self.level.snakebirds[sb.color].apply_clone(sb)
+        for i in range(0, len(self.snakebirds_l)):
+            self.level.snakebirds_l[i].unpack(self.snakebirds_l[i])
 
         for num in self.pushables.keys():
-            self.level.pushables[num].apply_clone(self.pushables[num])
+            self.level.pushables[num].unpack(self.pushables[num])
 
         self.level.populate_snake_coords()
 
         self.level.teleporter_occupied = self.teleporter_occupied.copy()
 
-        if self.moves is not None:
-            return list(self.moves)
+        moves = []
+        for i in range(0, len(self.moves), 2):
+            moves.append(struct.unpack('BB', self.moves[i:i+2]))
+
+        return moves
 
     def checksum(self):
         """
@@ -1325,10 +1340,10 @@ class State(object):
         # sorting in here will actually increase solve times for some
         # levels, though from my testing that's pretty negligible if
         # it does happen.
-        sumlist.extend(sorted([sb.checksum() for sb in self.snakebirds_l]))
+        sumlist.extend(sorted(self.snakebirds_l))
 
         # Pushables
-        sumlist.append(b''.join([obj.checksum() for obj in self.pushables.values()]))
+        sumlist.append(b''.join([obj[0:2] for obj in self.pushables.values() if len(obj) > 0]))
 
         # Construct the full checksum
         return b'\xff'.join(sumlist)
@@ -1390,7 +1405,7 @@ class State(object):
         For each goal, finds the cost of the cheapest path to achieve that goal over all starting points.
         If reverse=True, then the snakebirds are moving from the goals to the starting points.
         """
-        only_one_snakebird = sum(1 for sb in self.snakebirds_l if not sb.exited and not sb.destroyed) == 1
+        only_one_snakebird = sum(1 for sb in self.snakebirds_l if len(sb) > 0) == 1
         min_cost = {}
         plan_path = lambda s, g: self.shortest_path(*((g, s) if reverse else (s, g)), only_one_snakebird)
         for g in goals:
@@ -1404,7 +1419,12 @@ class State(object):
         (snakebird -> exit or snakebird -> fruit -> exit). Usually quite weak, but can still help a lot.
         """
         directions = list(DIR_MODS.values())
-        sb_heads = [sb.decapitate() for sb in self.snakebirds_l if not sb.exited and not sb.destroyed]
+        sb_heads = []
+        for sb in self.snakebirds_l:
+            if len(sb) > 0:
+                head = struct.unpack('BB', sb[0:2])
+                neck = struct.unpack('BB', sb[2:4])
+                sb_heads.append((head, (head[0] - neck[0], head[1] - neck[1])))
         exits = [(self.level.exit, direction) for direction in directions]
 
         sb_to_exit_max = min(self.plan_paths([self.level.exit], sb_heads, reverse=True).values())
@@ -1517,7 +1537,7 @@ class Game(object):
         return (False, False)
 
     def validate_move(self, sb, direction, state=None):
-        self.moves.append((sb, direction))
+        self.moves.append((sb.color, direction))
         self.push_state(state)
         self.cur_steps += 1
 
@@ -1542,8 +1562,8 @@ class Game(object):
 
     def print_winning_move_set(self, move_set):
         print('Winning moves ({}) for {}:'.format(len(move_set), self.level.desc))
-        for (n, (sb, move)) in enumerate(move_set):
-            print("\t{}. {}: {}".format(n+1, SNAKE_T[sb.color], DIR_T[move]))
+        for (n, (color, move)) in enumerate(move_set):
+            print("\t{}. {}: {}".format(n+1, SNAKE_T[color], DIR_T[move]))
 
     def store_winning_moves(self, quiet=False, display_moves=True):
         if not quiet:
@@ -1815,7 +1835,7 @@ class Game(object):
             print('Captured an Exception: {}'.format(str(e)))
         self.level.print_debug_info()
         print('Current list of moves:')
-        for (n, (sb, move)) in enumerate(self.moves):
-            print("\t{}. {}: {}".format(n+1, SNAKE_T[sb.color], DIR_T[move]))
+        for (n, (color, move)) in enumerate(self.moves):
+            print("\t{}. {}: {}".format(n+1, SNAKE_T[color], DIR_T[move]))
         print('(end)')
         print('')
