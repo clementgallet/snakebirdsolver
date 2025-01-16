@@ -638,9 +638,7 @@ class Snakebird(object):
         return b''.join([struct.pack('BB', *c) for c in self.cells])
 
     def unpack(self, packed):
-        self.cells = []
-        for i in range(0, len(packed), 2):
-            self.cells.append(struct.unpack('BB', packed[i:i+2]))
+        self.cells = [struct.unpack('BB', packed[i:i+2]) for i in range(0, len(packed), 2)]
         self.exited = False
         self.destroyed = len(self.cells) == 0        
 
@@ -1248,20 +1246,17 @@ class State(object):
 
         self.level = level
         self.fruits = {}
-        self.snakebirds_l = []
-        self.pushables_l = []
-        self.moves = []
+        self.snakebirds_l = b''
+        self.pushables_l = b''
+        self.moves = b''
         if len(moves) > 0:
             self.moves = b''.join([struct.pack('BB', *m) for m in moves])
         self.teleporter_occupied = level.teleporter_occupied.copy()
 
         for coord in level.fruits.keys():
             self.fruits[coord] = True
-        # TODO: I feel these could be combined...
-        for sb in level.snakebirds_l:
-            self.snakebirds_l.append(sb.pack())
-        for obj in level.pushables_l:
-            self.pushables_l.append(obj.pack())
+        self.snakebirds_l = b'\xff'.join(sb.pack() for sb in level.snakebirds_l)
+        self.pushables_l = b'\xff'.join(obj.pack() for obj in level.pushables_l)
 
     def apply(self):
 
@@ -1269,21 +1264,19 @@ class State(object):
         for coords in self.fruits.keys():
             self.level.fruits[coords] = True
 
-        for i in range(0, len(self.snakebirds_l)):
-            self.level.snakebirds_l[i].unpack(self.snakebirds_l[i])
+        snakebirds = self.snakebirds_l.split(b'\xff')
+        for i in range(0, len(snakebirds)):
+            self.level.snakebirds_l[i].unpack(snakebirds[i])
 
-        for i in range(0, len(self.pushables_l)):
-            self.level.pushables_l[i].unpack(self.pushables_l[i])
+        pushables = self.pushables_l.split(b'\xff')
+        for i in range(0, len(pushables)):
+            self.level.pushables_l[i].unpack(pushables[i])
 
         self.level.populate_snake_coords()
 
         self.level.teleporter_occupied = self.teleporter_occupied.copy()
 
-        moves = []
-        for i in range(0, len(self.moves), 2):
-            moves.append(struct.unpack('BB', self.moves[i:i+2]))
-
-        return moves
+        return [struct.unpack('BB', self.moves[i:i+2]) for i in range(0, len(self.moves), 2)]
 
     def checksum(self):
         """
@@ -1344,10 +1337,10 @@ class State(object):
         # sorting in here will actually increase solve times for some
         # levels, though from my testing that's pretty negligible if
         # it does happen.
-        sumlist.extend(sorted(self.snakebirds_l))
+        sumlist.append(self.snakebirds_l)
 
         # Pushables
-        sumlist.append(b''.join([obj[0:2] for obj in self.pushables_l if len(obj) > 0]))
+        sumlist.append(b''.join([obj[0:2] for obj in self.pushables_l.split(b'\xff') if len(obj) > 0]))
 
         # Construct the full checksum
         return b'\xff'.join(sumlist)
@@ -1409,7 +1402,7 @@ class State(object):
         For each goal, finds the cost of the cheapest path to achieve that goal over all starting points.
         If reverse=True, then the snakebirds are moving from the goals to the starting points.
         """
-        only_one_snakebird = sum(1 for sb in self.snakebirds_l if len(sb) > 0) == 1
+        only_one_snakebird = sum(1 for sb in self.level.snakebirds_l if len(sb) > 0) == 1
         min_cost = {}
         plan_path = lambda s, g: self.shortest_path(*((g, s) if reverse else (s, g)), only_one_snakebird)
         for g in goals:
@@ -1423,12 +1416,7 @@ class State(object):
         (snakebird -> exit or snakebird -> fruit -> exit). Usually quite weak, but can still help a lot.
         """
         directions = list(DIR_MODS.values())
-        sb_heads = []
-        for sb in self.snakebirds_l:
-            if len(sb) > 0:
-                head = struct.unpack('BB', sb[0:2])
-                neck = struct.unpack('BB', sb[2:4])
-                sb_heads.append((head, (head[0] - neck[0], head[1] - neck[1])))
+        sb_heads = [sb.decapitate() for sb in self.level.snakebirds_l if len(sb) > 0]
         exits = [(self.level.exit, direction) for direction in directions]
 
         sb_to_exit_max = min(self.plan_paths([self.level.exit], sb_heads, reverse=True).values())
