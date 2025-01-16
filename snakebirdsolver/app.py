@@ -810,6 +810,7 @@ class Level(object):
         # TODO: self.fruits should probably be a set()
         self.fruits = {}
         self.pushables = {}
+        self.pushables_l = []
         self.interactives = []
         body_pointers = {}
         self.won = False
@@ -981,6 +982,9 @@ class Level(object):
         for obj in self.pushables.values():
             if len(obj.cells) == 0:
                 raise Exception('Pushable Object {} has no cells defined (probably decoration/pushable ID mismatch)'.format(obj.desc))
+
+        # Construct our pushable list
+        self.pushables_l = [self.pushables[key] for key in sorted(self.pushables.keys())]
 
         # Make sure that if we have one teleporter cell, we have two
         if teleporter_1 is not None and teleporter_2 is None:
@@ -1187,11 +1191,11 @@ class Level(object):
         # Grab information about pushables and pushable decorations
         disp_pushable_coords = {}
         disp_pushable_decorations = {}
-        for (push_num, pushable) in self.pushables.items():
+        for pushable in self.pushables_l:
             for coords in pushable.cells:
                 disp_pushable_coords[coords] = '{}{}{}'.format(
-                        color_pushables[push_num],
-                        PUSH_CHARS[push_num],
+                        color_pushables[pushable.desc],
+                        PUSH_CHARS[pushable.desc],
                         color_reset,
                     )
             disp_pushable_decorations.update(pushable.get_decoration_chars())
@@ -1231,7 +1235,7 @@ class Level(object):
         print('Level SB coords:')
         for (coord, sb) in self.snake_coords.items():
             print('  {}: {}'.format(str(sb), coord))
-        for obj in self.pushables.values():
+        for obj in self.pushables_l:
             print('{}: {}'.format(str(obj), obj.cells))
         if (len(self.teleporter) > 0):
             print('Teleporter coords: {}'.format(self.teleporter))
@@ -1245,7 +1249,7 @@ class State(object):
         self.level = level
         self.fruits = {}
         self.snakebirds_l = []
-        self.pushables = {}
+        self.pushables_l = []
         self.moves = []
         if len(moves) > 0:
             self.moves = b''.join([struct.pack('BB', *m) for m in moves])
@@ -1256,8 +1260,8 @@ class State(object):
         # TODO: I feel these could be combined...
         for sb in level.snakebirds_l:
             self.snakebirds_l.append(sb.pack())
-        for (num, obj) in level.pushables.items():
-            self.pushables[num] = obj.pack()
+        for obj in level.pushables_l:
+            self.pushables_l.append(obj.pack())
 
     def apply(self):
 
@@ -1268,8 +1272,8 @@ class State(object):
         for i in range(0, len(self.snakebirds_l)):
             self.level.snakebirds_l[i].unpack(self.snakebirds_l[i])
 
-        for num in self.pushables.keys():
-            self.level.pushables[num].unpack(self.pushables[num])
+        for i in range(0, len(self.pushables_l)):
+            self.level.pushables_l[i].unpack(self.pushables_l[i])
 
         self.level.populate_snake_coords()
 
@@ -1343,7 +1347,7 @@ class State(object):
         sumlist.extend(sorted(self.snakebirds_l))
 
         # Pushables
-        sumlist.append(b''.join([obj[0:2] for obj in self.pushables.values() if len(obj) > 0]))
+        sumlist.append(b''.join([obj[0:2] for obj in self.pushables_l if len(obj) > 0]))
 
         # Construct the full checksum
         return b'\xff'.join(sumlist)
