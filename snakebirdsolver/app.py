@@ -1249,7 +1249,7 @@ class State(object):
         self.snakebirds_l = b''
         self.pushables_l = b''
         self.moves = b''
-        if len(moves) > 0:
+        if moves and len(moves) > 0:
             self.moves = b''.join([struct.pack('BB', *m) for m in moves])
         self.teleporter_occupied = level.teleporter_occupied.copy()
 
@@ -1268,9 +1268,10 @@ class State(object):
         for i in range(0, len(snakebirds)):
             self.level.snakebirds_l[i].unpack(snakebirds[i])
 
-        pushables = self.pushables_l.split(b'\xff')
-        for i in range(0, len(pushables)):
-            self.level.pushables_l[i].unpack(pushables[i])
+        if len(self.pushables_l) > 0:
+            pushables = self.pushables_l.split(b'\xff')
+            for i in range(0, len(pushables)):
+                self.level.pushables_l[i].unpack(pushables[i])
 
         self.level.populate_snake_coords()
 
@@ -1345,55 +1346,44 @@ class State(object):
         # Construct the full checksum
         return b'\xff'.join(sumlist)
 
-    def shortest_path(self, starting_point, goal, only_one_snakebird):
+    def shortest_path(self, starting_point, goal):
         """
         An underestimate of the cost of moving a snakebird between two (position, orientation) pairs,
         or from a (position, orientation) pair to a given position. The cache hit rate should be
         essentially 100% for hard levels, so performance doesn't matter too much.
         Also uses whether there is only one remaining snakebird, for a tiny bit of additional pruning.
         """
-        key = (starting_point, goal, only_one_snakebird)
+        key = (starting_point, goal)
         if key in self.level.distance_cache:
             return self.level.distance_cache[key]
         open_list = [(0, starting_point)]
         min_cost = collections.defaultdict(lambda: float('inf'))
         obstacles = (TYPE_WALL, TYPE_SPIKE, TYPE_VOID)
         while open_list:
-            cost, node = heapq.heappop(open_list)
-            if cost > min_cost[node]:
+            cost, position = heapq.heappop(open_list)
+            if cost > min_cost[position]:
                 continue
-            position, direction = node
-            for reached in (node, position):
-                if reached == goal:
-                    self.level.distance_cache[key] = (cost + 1) // 2
-                    return (cost + 1) // 2
+            if position == goal:
+                self.level.distance_cache[key] = (cost + 1) // 2
+                return (cost + 1) // 2
             #Very conservative approximation if there are teleporters
             for t_from, t_to in self.level.teleporter.items():
                 if abs(position[0] - t_from[0]) + abs(position[1] - t_from[1]) < self.level.snakebird_length_max:
                     position1 = (position[0] + t_to[0] - t_from[0], position[1] + t_to[1] - t_from[1])
                     if self.level.cells[position1[1]][position1[0]] in obstacles:
                         continue
-                    node1 = (position1, direction)
-                    if cost < min_cost[node1]:
-                        min_cost[node1] = cost
-                        heapq.heappush(open_list, (cost, node1))
+                    if cost < min_cost[position1]:
+                        min_cost[position1] = cost
+                        heapq.heappush(open_list, (cost, position1))
             for ((dx, dy), edge_cost) in zip([(-1, 0), (1, 0), (0, -1), (0, 1), (0, 1)], [1] * 4 + [0]):
                 position1 = (position[0] + dx, position[1] + dy)
                 if self.level.cells[position1[1]][position1[0]] in obstacles:
                     continue
                 cost1 = cost + edge_cost
                 #Account for freefall and pushing
-                if edge_cost and (-dx, -dy) != direction:
-                    directions = [direction, (dx, dy)]
-                else:
-                    if edge_cost and only_one_snakebird:
-                        continue
-                    directions = [direction]
-                for direction1 in directions:
-                    node1 = (position1, direction1)
-                    if cost1 < min_cost[node1]:
-                        min_cost[node1] = cost1
-                        heapq.heappush(open_list, (cost1, node1))
+                if cost1 < min_cost[position1]:
+                    min_cost[position1] = cost1
+                    heapq.heappush(open_list, (cost1, position1))
         self.level.distance_cache[key] = float('inf')
         return float('inf')
 
@@ -1402,9 +1392,8 @@ class State(object):
         For each goal, finds the cost of the cheapest path to achieve that goal over all starting points.
         If reverse=True, then the snakebirds are moving from the goals to the starting points.
         """
-        only_one_snakebird = sum(1 for sb in self.level.snakebirds_l if len(sb) > 0) == 1
         min_cost = {}
-        plan_path = lambda s, g: self.shortest_path(*((g, s) if reverse else (s, g)), only_one_snakebird)
+        plan_path = lambda s, g: self.shortest_path(*((g, s) if reverse else (s, g)))
         for g in goals:
             min_cost[g] = min(plan_path(s, g) for s in starting_points)
         return min_cost
@@ -1415,22 +1404,20 @@ class State(object):
         Treats each snakebird as a flying head and conservatively considers only the most expensive subgoal
         (snakebird -> exit or snakebird -> fruit -> exit). Usually quite weak, but can still help a lot.
         """
-        directions = list(DIR_MODS.values())
-        sb_heads = [sb.decapitate() for sb in self.level.snakebirds_l if len(sb) > 0]
-        exits = [(self.level.exit, direction) for direction in directions]
-
+        sb_heads = [sb.cells[0] for sb in self.level.snakebirds_l if len(sb) > 0]
         sb_to_exit_max = min(self.plan_paths([self.level.exit], sb_heads, reverse=True).values())
 
         if not self.fruits:
             return sb_to_exit_max
 
-        fruits = [(fruit, direction) for fruit in self.fruits for direction in directions]
-        fruit_to_exit = self.plan_paths(exits, fruits, reverse=True)
-        sb_to_fruit = self.plan_paths(sb_heads, fruits)
-        h = sb_to_exit_max
+        fruit_to_exit = self.plan_paths([self.level.exit], self.fruits, reverse=True)
+        sb_to_fruit = self.plan_paths(sb_heads, self.fruits)
+        lower_to_fruit = 0
+        lower_to_exit  = sb_to_exit_max
         for fruit in self.fruits:
-            h = max(h, min(sb_to_fruit[(fruit, direction)] + fruit_to_exit[(fruit, direction)] for direction in directions))
-        return h
+            lower_to_fruit = max(lower_to_fruit, sb_to_fruit[fruit])
+            lower_to_exit = min(lower_to_exit, fruit_to_exit[fruit])
+        return lower_to_fruit + lower_to_exit
 
 class Game(object):
     
