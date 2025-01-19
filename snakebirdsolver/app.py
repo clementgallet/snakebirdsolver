@@ -1098,6 +1098,7 @@ class Level(object):
         a win condition after each round of falling, in case we win
         mid-fall, and will return `True` if we won.  (`False` otherwise)
         """
+        fall_time = 0
         something_fell = True
         to_process = set(self.interactives)
         supported_objs = set()
@@ -1110,6 +1111,12 @@ class Level(object):
                 elif supported:
                     to_process.remove(sb)
                     supported_objs.add(sb)
+
+            if something_fell:
+                if fall_time == 0:
+                    fall_time = 0.9
+                else:
+                    fall_time += 0.5
 
             # If nothing fell but we have objects left in to_process,
             # we've got objects supported by other objects.  The supporting
@@ -1167,12 +1174,16 @@ class Level(object):
 
                     # ... aaand note that we fell.
                     something_fell = True
+                    if fall_time == 0:
+                        fall_time = 0.9
+                    else:
+                        fall_time += 0.5
 
             # If we won, return!
             if self.won:
-                return True
+                return 0
 
-        return False
+        return fall_time
 
     def print_level(self):
         """
@@ -1492,28 +1503,28 @@ class Game(object):
                 self.level.populate_snake_coords()
                 if self.level.won:
                     self.validate_move(sb, direction, state)
-                    return (True, True)
+                    return (True, True, 0)
                 if sb.move(direction>>4):
                     self.level.populate_snake_coords()
                     # Check to see if we won and exit if we have
                     self.validate_move(sb, direction, state)
                     if self.level.won:
-                        return (True, True)
-                    self.level.check_fall()
-                    return (True, True)
-                return (False, True)
+                        return (True, True, 0)
+                    fall_time = self.level.check_fall()
+                    return (True, True, fall_time)
+                return (False, True, 0)
         else:
             if (sb.move(direction)):
                 self.level.populate_snake_coords()
                 self.validate_move(sb, direction, state)
                 # Check to see if we won and exit if we have
                 if self.level.won:
-                    return (True, True)
-                if len(self.moves) % 2 == 0:
-                    self.level.check_fall()
-                return (True, True)
+                    return (True, True, 0)
+#                if len(self.moves) % 2 == 0:
+                fall_time = self.level.check_fall()
+                return (True, True, fall_time)
 
-        return (False, False)
+        return (False, False, False)
 
     def validate_move(self, sb, direction, state=None):
         self.moves.append((sb.color, direction))
@@ -1737,7 +1748,7 @@ class Game(object):
                         if dirty:
                             self.moves = state.apply()
                         try:
-                            (moved, dirty) = self.move(sb, direction, state)
+                            (moved, dirty, fall_time) = self.move(sb, direction, state)
                             if moved:
                                 if self.level.won:
                                     if not quiet:
@@ -1784,8 +1795,12 @@ class Game(object):
                 for direction in DIRS_DOUBLE:
                     if dirty:
                         self.moves = state.apply()
+                for direction in DIRS_ALL:
+                    self.moves = state.apply()
+                    # if dirty:
+                    #     self.moves = state.apply()
                     try:
-                        (moved, dirty) = self.move(sb, direction, state)
+                        (moved, dirty, fall_time) = self.move(sb, direction, state)
                         if moved:
                             if self.level.won:
                                 if not quiet:
@@ -1795,7 +1810,8 @@ class Game(object):
                                     return
                                 self.level.won = False
                                 break
-                            g1 = g + 1
+                            g1 = g + 1 + fall_time
+#                            g1 = g + 1
                             (new_state, is_new_state, new_checksum) = self.get_state(moves=self.moves, steps=g1)
                             if is_new_state:
                                 h1 = new_state.heuristic()
