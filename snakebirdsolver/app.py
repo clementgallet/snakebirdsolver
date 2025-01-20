@@ -811,6 +811,7 @@ class Level(object):
         self.pushables_l = []
         self.interactives = []
         body_pointers = {}
+        self.can_win = False
         self.won = False
         self.max_defined_steps = 100
         self.return_first_solution = False
@@ -1026,15 +1027,15 @@ class Level(object):
         """
         Check to see if we've won
         """
-        one_existed = False
+        one_exited = False
         one_alive = False
         for sb in self.snakebirds_l:
             if sb.exited:
-                one_existed = True
+                one_exited = True
             elif not sb.destroyed:
                 one_alive = True
-        if one_existed:
-            if not one_alive:
+        if one_exited:
+            if not one_alive and self.can_win:
                 self.won = True
                 return True
             else:
@@ -1498,6 +1499,10 @@ class Game(object):
         Return if we moved, and if not, if the state is dirty
         """
     
+        # Before moving, check that only one snakebird is alive to be able
+        # to win after this move
+        self.level.can_win = len([sb for sb in self.level.snakebirds_l if len(sb) > 0]) == 1
+        
         if direction > 8:
             if sb.move(direction&0xf):
                 self.level.populate_snake_coords()
