@@ -17,7 +17,7 @@ def report_game_end():
         else:
             print('No solutions found in %d turns!' % (game.max_steps))
     else:
-        game.print_winning_move_set(game.solution)
+        game.print_winning_move_set(game.solution, game.solution_length)
     #for csum in sorted(game.checksums.keys()):
     #    print(csum)
 

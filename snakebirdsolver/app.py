@@ -817,6 +817,7 @@ class Level(object):
         self.return_first_solution = False
         self.preferred_algorithm = 'BFS'
         self.die_on_pushable_loss = True
+        self.with_fall_cost = True
         self.teleporter = {}
         self.teleporter_occupied = {}
         self.exit = None
@@ -1182,7 +1183,7 @@ class Level(object):
 
             # If we won, return!
             if self.won:
-                return 0
+                return fall_time
 
         return fall_time
 
@@ -1555,21 +1556,22 @@ class Game(object):
             else:
                 return False
 
-    def print_winning_move_set(self, move_set):
-        print('Winning moves ({}) for {}:'.format(len(move_set), self.level.desc))
+    def print_winning_move_set(self, move_set, length):
+        print('Winning moves ({}) for {}:'.format(length, self.level.desc))
         for (n, (color, move)) in enumerate(move_set):
             print("\t{}. {}: {}".format(n+1, SNAKE_T[color], DIR_T[move]))
 
-    def store_winning_moves(self, quiet=False, display_moves=True):
+    def store_winning_moves(self, length, quiet=False, display_moves=True):
         if not quiet:
-            print('Found winning solution with {} moves'.format(len(self.moves)))
-        self.max_steps = len(self.moves)-1
-        if self.solution is None or len(self.moves) < len(self.solution):
+            print('Found winning solution with {} moves'.format(length))
+#        self.max_steps = len(self.moves)-1
+        if self.solution is None or length < self.solution_length:
+            self.solution_length = length
             self.solution = []
             for direction in self.moves:
                 self.solution.append(direction)
         if not quiet and display_moves:
-            self.print_winning_move_set(self.moves)
+            self.print_winning_move_set(self.moves, length)
 
     def print_status(self):
         self.level.print_level()
@@ -1585,7 +1587,7 @@ class Game(object):
         if self.level.won:
             print('You win!')
             print('')
-            self.store_winning_moves(display_moves=True)
+            self.store_winning_moves(len(self.moves), display_moves=True)
         elif self.alive == False:
             print('You have lost.')
         else:
@@ -1703,7 +1705,7 @@ class Game(object):
                     try:
                         self.move(sb, direction, state)
                         if self.level.won:
-                            self.store_winning_moves(quiet=quiet, display_moves=False)
+                            self.store_winning_moves(len(self.moves), quiet=quiet, display_moves=False)
                             if self.level.return_first_solution:
                                 return
                             self.undo()
@@ -1758,7 +1760,7 @@ class Game(object):
                                 if self.level.won:
                                     if not quiet:
                                         print('')
-                                    self.store_winning_moves(quiet=quiet, display_moves=False)
+                                    self.store_winning_moves(len(self.moves), quiet=quiet, display_moves=False)
                                     return
                                 (new_state, is_new_state) = self.get_state(moves=self.moves)
                                 if is_new_state:
@@ -1807,16 +1809,15 @@ class Game(object):
                     try:
                         (moved, dirty, fall_time) = self.move(sb, direction, state)
                         if moved:
+                            g1 = g + 1 + (fall_time if self.level.with_fall_cost else 0)
                             if self.level.won:
                                 if not quiet:
                                     print('')
-                                self.store_winning_moves(quiet=quiet, display_moves=False)
+                                self.store_winning_moves(g1, quiet=quiet, display_moves=True)
                                 if self.level.return_first_solution:
                                     return
                                 self.level.won = False
                                 break
-                            g1 = g + 1 + fall_time
-#                            g1 = g + 1
                             (new_state, is_new_state, new_checksum) = self.get_state(moves=self.moves, steps=g1)
                             if is_new_state:
                                 h1 = new_state.heuristic()
