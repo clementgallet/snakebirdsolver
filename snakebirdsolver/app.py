@@ -254,6 +254,7 @@ class Snakebird(object):
         self.destroyed = False
         self.cells = []
         self.checksum_id = bytes(SNAKE_T[self.color][0], encoding='latin1')
+        self.pending_teleporter = False
 
     def __len__(self):
         return len(self.cells)
@@ -364,7 +365,7 @@ class Snakebird(object):
         # Finally, if we got here we moved, so return True
         return (True, seen_snakes)
 
-    def process_teleport(self, index, clean_up_level_cells=False):
+    def process_teleport(self, index, clean_up_level_cells=False, process_teleport=True):
         """
         Processes a teleport of ourselves, with the teleporter at the given `index`.
         If `clean_up_level_cells` is set to `True`, we will additionally update
@@ -398,9 +399,21 @@ class Snakebird(object):
                         cell_type != TYPE_TELEPORTER)):
                 # We'd be blocked, so don't teleport!
                 self.level.teleporter_occupied[cur_pivot] = self
+                
+                # If it was a forced teleport due to double move, we are softlocked!
+                if self.pending_teleporter:
+                    self.pending_teleporter = False
+                    raise PlayerLose('Softlocked by double move inside teleporter')
                 return False
             new_cells.append(new_cell)
 
+        # If we don't actually process a teleport, when first move of a double
+        # move, we store the pending teleporter id to trigger later
+        if not process_teleport:
+            self.pending_teleporter = True
+            return
+
+        self.pending_teleporter = False
         # Clean up level.snake_coords if told to
         if clean_up_level_cells:
             for coord in self.cells:
@@ -416,7 +429,7 @@ class Snakebird(object):
         # Return true
         return True
 
-    def move(self, direction):
+    def move(self, direction, process_teleport=True):
         """
         Attempts to move us in the specified direction.  Returns `True` if we
         moved, and `False` if we didn't.  Will push other snakebirds/pushables
@@ -450,6 +463,16 @@ class Snakebird(object):
                                     break
                             if teleport_idx is not None:
                                 sb.process_teleport(teleport_idx)
+                    if process_teleport:
+                        for sb in snakes:
+                            if not sb.check_exit():
+                                teleport_idx = None
+                                for (idx, coord) in enumerate(sb.cells):
+                                    if coord in self.level.teleporter:
+                                        teleport_idx = idx
+                                        break
+                                if teleport_idx is not None:
+                                    sb.process_teleport(teleport_idx)
                 else:
                     return False
 
@@ -466,10 +489,16 @@ class Snakebird(object):
             old_coords = self.cells.pop()
             self.cells.insert(0, coords)
             if not self.check_exit():
+                if process_teleport and self.pending_teleporter:
+                    self.process_teleport(1)
+                    self.pending_teleporter = False
                 if cell_type == TYPE_TELEPORTER:
-                    self.process_teleport(0)
+                    self.process_teleport(0, process_teleport=process_teleport)
             return True
         else:
+            if self.pending_teleporter:
+                self.process_teleport(0)
+                self.pending_teleporter = False
             return False
 
     def get_adjacents(self, direction, pushing_snake=None):
@@ -1049,7 +1078,7 @@ class Level(object):
                 return
         raise PlayerLose('Fell to your death!')
 
-    def populate_snake_coords(self):
+    def populate_snake_coords(self, process_teleport=True):
         """
         Populates our var which keeps track of which coordinates snakes
         are occupying.  Also keeps track of our teleporter, if we have
@@ -1063,7 +1092,8 @@ class Level(object):
                 self.snake_coords[coords] = sb
 
         # Also do teleporters, but in a separate function
-        self.populate_teleporter_coords()
+        if process_teleport:
+            self.populate_teleporter_coords()
 
 
     def populate_teleporter_coords(self):
@@ -1503,14 +1533,15 @@ class Game(object):
         # Before moving, check that only one snakebird is alive to be able
         # to win after this move
         self.level.can_win = len([sb for sb in self.level.snakebirds_l if len(sb) > 0]) == 1
+        sb.pending_teleporter = False
         
         if direction > 8:
-            if sb.move(direction&0xf):
-                self.level.populate_snake_coords()
+            if sb.move(direction&0xf, process_teleport=False):
+                self.level.populate_snake_coords(process_teleport=False)
                 if self.level.won:
                     self.validate_move(sb, direction, state)
                     return (True, True, 0)
-                if sb.move(direction>>4):
+                if sb.move(direction>>4, process_teleport=True):
                     self.level.populate_snake_coords()
                     # Check to see if we won and exit if we have
                     self.validate_move(sb, direction, state)
@@ -1520,7 +1551,7 @@ class Game(object):
                     return (True, True, fall_time)
                 return (False, True, 0)
         else:
-            if (sb.move(direction)):
+            if (sb.move(direction, process_teleport=True)):
                 self.level.populate_snake_coords()
                 self.validate_move(sb, direction, state)
                 # Check to see if we won and exit if we have
