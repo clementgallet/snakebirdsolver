@@ -1131,26 +1131,31 @@ class Level(object):
         mid-fall, and will return `True` if we won.  (`False` otherwise)
         """
         fall_time = 0
-        something_fell = True
+        something_fell_this_step = True
         to_process = set(self.interactives)
         supported_objs = set()
-        while something_fell:
-            something_fell = False
-            for sb in to_process.copy():
-                (fell, supported) = sb.fall()
-                if fell:
-                    something_fell = True
-                elif supported:
-                    to_process.remove(sb)
-                    supported_objs.add(sb)
+        while something_fell_this_step:
+            to_process = set(self.interactives)
+            something_fell_this_step = False
 
-            if something_fell:
-                if fall_time == 0:
-                    fall_time = 0.9
-                else:
-                    fall_time += 0.5
+            # First, trigger falls for all objects. The loop needs to be
+            # called multiple times because objects can support other objects
+            # but this takes a single step
+            something_fell = True
+            while something_fell:
+                something_fell = False
+                for sb in to_process.copy():
+                    (fell, supported) = sb.fall()
+                    if fell:
+                        something_fell = True
+                        something_fell_this_step = True
+                        to_process.remove(sb)
+                    elif supported:
+                        to_process.remove(sb)
+                        supported_objs.add(sb)
 
-            # If nothing fell but we have objects left in to_process,
+
+            # If we have objects left in to_process,
             # we've got objects supported by other objects.  The supporting
             # objects will either be supported themselves (in which case we
             # can do nothing), but the other alternative is that we've got
@@ -1171,7 +1176,7 @@ class Level(object):
             #
             # So, recursion of a sort needs to happen.
 
-            if not something_fell and len(to_process) > 0:
+            if len(to_process) > 0:
                 set_supported_obj = True
                 while set_supported_obj and len(to_process) > 0:
                     set_supported_obj = False
@@ -1205,11 +1210,13 @@ class Level(object):
                                 sb.process_teleport(teleport_idx, clean_up_level_cells=True)
 
                     # ... aaand note that we fell.
-                    something_fell = True
-                    if fall_time == 0:
-                        fall_time = 0.9
-                    else:
-                        fall_time += 0.5
+                    something_fell_this_step = True
+
+            if something_fell_this_step:
+                if fall_time == 0:
+                    fall_time = 0.9
+                else:
+                    fall_time += 0.5
 
             # If we won, return!
             if self.won:
