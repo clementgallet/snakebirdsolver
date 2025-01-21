@@ -145,6 +145,10 @@ pushable_char_map = {
     'V': '┬',
 }
 
+# How much time does a fall takes for each cell heigth.
+# Units relative to a single move (one move takes one unit of time)
+FALL_COSTS = [0, 7/8, 11/8, 14/8, 16/8, 17/8, 19/8, 20/8, 22/8, 23/8, 24/8, 25/8]
+
 # Colors.
 try:
     import colorama
@@ -1130,7 +1134,7 @@ class Level(object):
         a win condition after each round of falling, in case we win
         mid-fall, and will return `True` if we won.  (`False` otherwise)
         """
-        fall_time = 0
+        fall_height = 0
         something_fell_this_step = True
         to_process = set(self.interactives)
         supported_objs = set()
@@ -1213,16 +1217,13 @@ class Level(object):
                     something_fell_this_step = True
 
             if something_fell_this_step:
-                if fall_time == 0:
-                    fall_time = 0.9
-                else:
-                    fall_time += 0.5
+                fall_height += 1
 
             # If we won, return!
             if self.won:
-                return fall_time
+                return FALL_COSTS[fall_height]
 
-        return fall_time
+        return FALL_COSTS[fall_height]
 
     def print_level(self):
         """
