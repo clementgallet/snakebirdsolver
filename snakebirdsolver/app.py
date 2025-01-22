@@ -147,7 +147,7 @@ pushable_char_map = {
 
 # How much time does a fall takes for each cell heigth.
 # Units relative to a single move (one move takes one unit of time)
-FALL_COSTS = [0, 7/8, 11/8, 14/8, 16/8, 17/8, 19/8, 20/8, 22/8, 23/8, 24/8, 25/8]
+FALL_COSTS = [0, 7/8, 11/8, 14/8, 16/8, 17/8, 19/8, 20/8, 22/8, 23/8, 25/8, 26/8, 28/8, 29/8, 31/8, 32/8]
 
 # Colors.
 try:
@@ -458,15 +458,6 @@ class Snakebird(object):
                     # where we may have had to undo a push
                     # TODO: I wonder what should happen first - exit or teleport?  Doesn't actually
                     # come into play in the actual levels, though, so difficult to know for sure.
-                    for sb in snakes:
-                        if not sb.check_exit():
-                            teleport_idx = None
-                            for (idx, coord) in enumerate(sb.cells):
-                                if coord in self.level.teleporter:
-                                    teleport_idx = idx
-                                    break
-                            if teleport_idx is not None:
-                                sb.process_teleport(teleport_idx)
                     if process_teleport:
                         for sb in snakes:
                             if not sb.check_exit():
@@ -690,7 +681,8 @@ class Snakebird(object):
         if dir_to_head > 0:
             head += struct.pack('B', dir_to_head)
         return head
-#       return b''.join([struct.pack('BB', *c) for c in self.cells])
+
+
 
 class Pushable(Snakebird):
     """
@@ -1136,10 +1128,9 @@ class Level(object):
         """
         fall_height = 0
         something_fell_this_step = True
-        to_process = set(self.interactives)
-        supported_objs = set()
         while something_fell_this_step:
             to_process = set(self.interactives)
+            supported_objs = set()
             something_fell_this_step = False
 
             # First, trigger falls for all objects. The loop needs to be
@@ -1603,7 +1594,7 @@ class Game(object):
     def store_winning_moves(self, length, quiet=False, display_moves=True):
         if not quiet:
             print('Found winning solution with {} moves'.format(length))
-#        self.max_steps = len(self.moves)-1
+        self.max_steps = length
         if self.solution is None or length < self.solution_length:
             self.solution_length = length
             self.solution = []
@@ -1838,9 +1829,6 @@ class Game(object):
             for sb in self.level.snakebirds_l:
                 if sb.exited or sb.destroyed:
                     continue
-                for direction in DIRS_DOUBLE:
-                    if dirty:
-                        self.moves = state.apply()
                 for direction in DIRS_ALL:
                     self.moves = state.apply()
                     # if dirty:
